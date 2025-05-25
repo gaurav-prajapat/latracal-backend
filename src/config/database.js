@@ -1,25 +1,67 @@
 const mysql = require('mysql2/promise');
 
-let db = null;
+let db;
 
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'book_review_platform',
+  database: process.env.DB_NAME || 'book_review_db',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  // Remove these invalid options that cause warnings:
+  // acquireTimeout, timeout, reconnect
+  
+  // Use these valid options instead:
+  acquireTimeout: undefined, // Remove this line completely
+  timeout: undefined,        // Remove this line completely
+  reconnect: undefined,      // Remove this line completely
+  
+  // Add proper SSL configuration for production
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false
+  } : false,
+  
+  // Add connection timeout settings
+  connectTimeout: 60000,
   acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true
+  timeout: 60000
+};
+
+const getDB = () => {
+  if (!db) {
+    throw new Error('Database not initialized');
+  }
+  return db;
 };
 
 const initDatabase = async () => {
   try {
-    // Create connection pool
-    db = mysql.createPool(dbConfig);
+    console.log('Attempting to connect to database...');
+    console.log('DB Host:', process.env.DB_HOST);
+    console.log('DB Name:', process.env.DB_NAME);
+    console.log('DB User:', process.env.DB_USER);
     
+    // Create connection pool with corrected config
+    db = mysql.createPool({
+      host: process.env.DB_HOST,
+      port: parseInt(process.env.DB_PORT) || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      ssl: process.env.NODE_ENV === 'production' ? {
+        rejectUnauthorized: false
+      } : false,
+      connectTimeout: 60000
+    });
+    
+    // Test the connection
+    await db.execute('SELECT 1');
     console.log('Connected to MySQL database');
     
     // Create tables if they don't exist
@@ -30,12 +72,20 @@ const initDatabase = async () => {
     
   } catch (error) {
     console.error('Database connection failed:', error);
+    console.error('Error details:', {
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage
+    });
     throw error;
   }
 };
 
 const createTables = async () => {
   try {
+    console.log('Creating tables...');
+    
     // Users table
     await db.execute(`
       CREATE TABLE IF NOT EXISTS users (
@@ -51,6 +101,7 @@ const createTables = async () => {
         INDEX idx_role (role)
       )
     `);
+    console.log('Users table created/verified');
 
     // Books table
     await db.execute(`
@@ -69,10 +120,10 @@ const createTables = async () => {
         INDEX idx_author (author),
         INDEX idx_genre (genre),
         INDEX idx_isbn (isbn),
-        INDEX idx_published_date (published_date),
-        FULLTEXT idx_search (title, author, description)
+        INDEX idx_published_date (published_date)
       )
     `);
+    console.log('Books table created/verified');
 
     // Reviews table
     await db.execute(`
@@ -87,29 +138,14 @@ const createTables = async () => {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
         UNIQUE KEY unique_user_book (user_id, book_id),
-        INDEX idx_book_id (book_id),
         INDEX idx_user_id (user_id),
-        INDEX idx_rating (rating),
-        INDEX idx_created_at (created_at)
+        INDEX idx_book_id (book_id),
+        INDEX idx_rating (rating)
       )
     `);
-
-    // Wishlist table (optional feature)
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS wishlist (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        book_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_user_book_wishlist (user_id, book_id),
-        INDEX idx_user_wishlist (user_id),
-        INDEX idx_book_wishlist (book_id)
-      )
-    `);
-
-    console.log('Database tables created/verified successfully');
+    console.log('Reviews table created/verified');
+    
+    console.log('All tables created successfully');
   } catch (error) {
     console.error('Error creating tables:', error);
     throw error;
@@ -118,156 +154,59 @@ const createTables = async () => {
 
 const insertDemoData = async () => {
   try {
-    // Check if demo data already exists
-    const [existingBooks] = await db.execute('SELECT COUNT(*) as count FROM books');
-    if (existingBooks[0].count > 0) {
-      console.log('Demo data already exists, skipping insertion');
-      return;
-    }
+    // Check if admin user exists
+    const [adminExists] = await db.execute(
+      'SELECT id FROM users WHERE email = ?',
+      ['admin@bookreviews.com']
+    );
 
-    console.log('Inserting demo data...');
-
-    // Insert demo books
-    const demoBooks = [
-      {
-        title: 'To Kill a Mockingbird',
-        author: 'Harper Lee',
-        description: 'A gripping, heart-wrenching, and wholly remarkable tale of coming-of-age in a South poisoned by virulent prejudice.',
-        isbn: '9780061120084',
-        published_date: '1960-07-11',
-        genre: 'Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51IXWZzlgSL._SX330_BO1,204,203,200_.jpg'
-      },
-      {
-        title: '1984',
-        author: 'George Orwell',
-        description: 'A dystopian social science fiction novel that follows the life of Winston Smith, a low-ranking member of the Party.',
-        isbn: '9780451524935',
-        published_date: '1949-06-08',
-        genre: 'Science Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51Dd6aUVqQL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'Pride and Prejudice',
-        author: 'Jane Austen',
-                description: 'A romantic novel that follows the character development of Elizabeth Bennet, the dynamic protagonist.',
-        isbn: '9780141439518',
-        published_date: '1813-01-28',
-        genre: 'Romance',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51wScUt0gQL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'The Great Gatsby',
-        author: 'F. Scott Fitzgerald',
-        description: 'A classic American novel set in the Jazz Age that tells the story of Jay Gatsby and his pursuit of the American Dream.',
-        isbn: '9780743273565',
-        published_date: '1925-04-10',
-        genre: 'Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51XlnZTRnTL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'The Catcher in the Rye',
-        author: 'J.D. Salinger',
-        description: 'A controversial novel that has become a classic of American literature, following teenager Holden Caulfield.',
-        isbn: '9780316769174',
-        published_date: '1951-07-16',
-        genre: 'Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51icVOTqlvL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'Harry Potter and the Philosopher\'s Stone',
-        author: 'J.K. Rowling',
-        description: 'The first novel in the Harry Potter series, following a young wizard\'s journey at Hogwarts School.',
-        isbn: '9780747532699',
-        published_date: '1997-06-26',
-        genre: 'Fantasy',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51HSkTKlauL._SX346_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'The Lord of the Rings',
-        author: 'J.R.R. Tolkien',
-        description: 'An epic high fantasy novel that follows the quest to destroy the One Ring and defeat the Dark Lord Sauron.',
-        isbn: '9780544003415',
-        published_date: '1954-07-29',
-        genre: 'Fantasy',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51EstVXM1UL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'The Hobbit',
-        author: 'J.R.R. Tolkien',
-        description: 'A fantasy novel that follows the journey of Bilbo Baggins as he joins a group of dwarves on a quest.',
-        isbn: '9780547928227',
-        published_date: '1937-09-21',
-        genre: 'Fantasy',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51M8dY7s7cL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'Dune',
-        author: 'Frank Herbert',
-        description: 'A science fiction novel set in the distant future amidst a feudal interstellar society.',
-        isbn: '9780441172719',
-        published_date: '1965-08-01',
-        genre: 'Science Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51cUVaBosEL._SX331_BO1,204,203,200_.jpg'
-      },
-      {
-        title: 'The Hitchhiker\'s Guide to the Galaxy',
-        author: 'Douglas Adams',
-        description: 'A comedic science fiction series that follows the adventures of Arthur Dent.',
-        isbn: '9780345391803',
-        published_date: '1979-10-12',
-        genre: 'Science Fiction',
-        cover_image: 'https://images-na.ssl-images-amazon.com/images/I/51MzUz8rQcL._SX331_BO1,204,203,200_.jpg'
-      }
-    ];
-
-    for (const book of demoBooks) {
+    if (adminExists.length === 0) {
+      const bcrypt = require('bcryptjs');
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      
       await db.execute(
-        `INSERT INTO books (title, author, description, isbn, published_date, genre, cover_image) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [book.title, book.author, book.description, book.isbn, book.published_date, book.genre, book.cover_image]
+        'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
+        ['admin', 'admin@bookreviews.com', hashedPassword, 'admin']
       );
+      console.log('Demo admin user created');
     }
 
-    console.log('Demo books inserted successfully');
+    // Add some demo books if none exist
+    const [booksCount] = await db.execute('SELECT COUNT(*) as count FROM books');
+    if (booksCount[0].count === 0) {
+      const demoBooks = [
+        {
+          title: 'The Great Gatsby',
+          author: 'F. Scott Fitzgerald',
+          description: 'A classic American novel set in the Jazz Age.',
+          isbn: '9780743273565',
+          published_date: '1925-04-10',
+          genre: 'Fiction'
+        },
+        {
+          title: 'To Kill a Mockingbird',
+          author: 'Harper Lee',
+          description: 'A gripping tale of racial injustice and childhood innocence.',
+          isbn: '9780061120084',
+          published_date: '1960-07-11',
+          genre: 'Fiction'
+        }
+      ];
+
+      for (const book of demoBooks) {
+        await db.execute(
+          'INSERT INTO books (title, author, description, isbn, published_date, genre) VALUES (?, ?, ?, ?, ?, ?)',
+          [book.title, book.author, book.description, book.isbn, book.published_date, book.genre]
+        );
+      }
+      console.log('Demo books created');
+    }
   } catch (error) {
     console.error('Error inserting demo data:', error);
-    // Don't throw error here as it's not critical for app functionality
-  }
-};
-
-const getDB = () => {
-  if (!db) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
-  return db;
-};
-
-const closeDatabase = async () => {
-  if (db) {
-    await db.end();
-    db = null;
-    console.log('Database connection closed');
-  }
-};
-
-// Test database connection
-const testConnection = async () => {
-  try {
-    const connection = await db.getConnection();
-    await connection.ping();
-    connection.release();
-    return true;
-  } catch (error) {
-    console.error('Database connection test failed:', error);
-    return false;
   }
 };
 
 module.exports = {
   initDatabase,
-  getDB,
-  closeDatabase,
-  testConnection
+  getDB
 };
-
