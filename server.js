@@ -24,10 +24,10 @@ app.get('/api/health', (req, res) => {
 });
 
 // Routes
-app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/books', require('./src/routes/books'));
-app.use('/api/reviews', require('./src/routes/reviews'));
-app.use('/api/users', require('./src/routes/users'));
+app.use('/api/auth', require('./src/routes/authRoutes'));
+app.use('/api/books', require('./src/routes/bookRoutes'));
+app.use('/api/reviews', require('./src/routes/reviewRoutes'));
+app.use('/api/users', require('./src/routes/userRoutes'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
