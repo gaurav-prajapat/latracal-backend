@@ -18,7 +18,6 @@ const router = express.Router();
 router.get('/profile', authenticateToken, getUserProfile);
 router.put('/profile', authenticateToken, updateUserProfile);
 router.put('/:id/password', authenticateToken, changePassword);
-router.get('/:id/reviews', authenticateToken, getUserReviews);
 
 // Public/Protected routes
 router.get('/:id', authenticateToken, getUserById);
