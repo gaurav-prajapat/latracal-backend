@@ -1,9 +1,19 @@
+// Load environment variables FIRST
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { initDatabase } = require('./src/config/database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Debug: Log environment variables (remove in production)
+console.log('Environment variables loaded:');
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_NAME:', process.env.DB_NAME);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('NODE_ENV:', process.env.NODE_ENV);
 
 // Middleware
 app.use(cors({
@@ -49,7 +59,7 @@ const startServer = async () => {
     console.log('Environment:', process.env.NODE_ENV || 'development');
     
     // Add retry logic for database connection
-    let retries = 5;
+    let retries = 3;
     while (retries > 0) {
       try {
         await initDatabase();

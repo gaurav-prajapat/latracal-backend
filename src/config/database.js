@@ -2,34 +2,6 @@ const mysql = require('mysql2/promise');
 
 let db;
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'book_review_db',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  // Remove these invalid options that cause warnings:
-  // acquireTimeout, timeout, reconnect
-  
-  // Use these valid options instead:
-  acquireTimeout: undefined, // Remove this line completely
-  timeout: undefined,        // Remove this line completely
-  reconnect: undefined,      // Remove this line completely
-  
-  // Add proper SSL configuration for production
-  ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: false
-  } : false,
-  
-  // Add connection timeout settings
-  connectTimeout: 60000,
-  acquireTimeout: 60000,
-  timeout: 60000
-};
-
 const getDB = () => {
   if (!db) {
     throw new Error('Database not initialized');
@@ -39,13 +11,19 @@ const getDB = () => {
 
 const initDatabase = async () => {
   try {
-    console.log('Attempting to connect to database...');
+    console.log('Attempting to connect to Hostinger MySQL database...');
     console.log('DB Host:', process.env.DB_HOST);
     console.log('DB Name:', process.env.DB_NAME);
     console.log('DB User:', process.env.DB_USER);
+    console.log('DB Port:', process.env.DB_PORT);
     
-    // Create connection pool with corrected config
-    db = mysql.createPool({
+    // Validate required environment variables
+    if (!process.env.DB_HOST || !process.env.DB_NAME || !process.env.DB_USER || !process.env.DB_PASSWORD) {
+      throw new Error('Missing required database environment variables');
+    }
+    
+    // Hostinger MySQL configuration (NO SSL, clean config)
+    const dbConfig = {
       host: process.env.DB_HOST,
       port: parseInt(process.env.DB_PORT) || 3306,
       user: process.env.DB_USER,
@@ -54,15 +32,31 @@ const initDatabase = async () => {
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
-      ssl: process.env.NODE_ENV === 'production' ? {
-        rejectUnauthorized: false
-      } : false,
-      connectTimeout: 60000
+      // NO SSL for Hostinger
+      ssl: false,
+      // Remove invalid options that cause warnings
+      connectTimeout: 60000,
+      // Charset setting
+      charset: 'utf8mb4'
+    };
+    
+    console.log('Creating connection pool with config:', {
+      host: dbConfig.host,
+      port: dbConfig.port,
+      user: dbConfig.user,
+      database: dbConfig.database,
+      ssl: dbConfig.ssl
     });
     
+    // Create connection pool
+    db = mysql.createPool(dbConfig);
+    
     // Test the connection
-    await db.execute('SELECT 1');
-    console.log('Connected to MySQL database');
+    console.log('Testing database connection...');
+    const [rows] = await db.execute('SELECT 1 as test');
+    console.log('Database connection test successful:', rows);
+    
+    console.log('Connected to Hostinger MySQL database successfully');
     
     // Create tables if they don't exist
     await createTables();
@@ -71,12 +65,16 @@ const initDatabase = async () => {
     await insertDemoData();
     
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('Hostinger database connection failed:', error);
     console.error('Error details:', {
       code: error.code,
       errno: error.errno,
       sqlState: error.sqlState,
-      sqlMessage: error.sqlMessage
+      sqlMessage: error.sqlMessage,
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER
     });
     throw error;
   }
@@ -84,7 +82,7 @@ const initDatabase = async () => {
 
 const createTables = async () => {
   try {
-    console.log('Creating tables...');
+    console.log('Creating/verifying tables in Hostinger database...');
     
     // Users table
     await db.execute(`
@@ -99,9 +97,9 @@ const createTables = async () => {
         INDEX idx_email (email),
         INDEX idx_username (username),
         INDEX idx_role (role)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    console.log('Users table created/verified');
+    console.log('✓ Users table created/verified');
 
     // Books table
     await db.execute(`
@@ -121,9 +119,9 @@ const createTables = async () => {
         INDEX idx_genre (genre),
         INDEX idx_isbn (isbn),
         INDEX idx_published_date (published_date)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    console.log('Books table created/verified');
+    console.log('✓ Books table created/verified');
 
     // Reviews table
     await db.execute(`
@@ -141,19 +139,21 @@ const createTables = async () => {
         INDEX idx_user_id (user_id),
         INDEX idx_book_id (book_id),
         INDEX idx_rating (rating)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    console.log('Reviews table created/verified');
+    console.log('✓ Reviews table created/verified');
     
-    console.log('All tables created successfully');
+    console.log('All tables created/verified successfully in Hostinger database');
   } catch (error) {
-    console.error('Error creating tables:', error);
+    console.error('Error creating tables in Hostinger database:', error);
     throw error;
   }
 };
 
 const insertDemoData = async () => {
   try {
+    console.log('Checking for demo data...');
+    
     // Check if admin user exists
     const [adminExists] = await db.execute(
       'SELECT id FROM users WHERE email = ?',
@@ -168,7 +168,9 @@ const insertDemoData = async () => {
         'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
         ['admin', 'admin@bookreviews.com', hashedPassword, 'admin']
       );
-      console.log('Demo admin user created');
+      console.log('✓ Demo admin user created');
+    } else {
+      console.log('✓ Admin user already exists');
     }
 
     // Add some demo books if none exist
@@ -199,10 +201,13 @@ const insertDemoData = async () => {
           [book.title, book.author, book.description, book.isbn, book.published_date, book.genre]
         );
       }
-      console.log('Demo books created');
+      console.log('✓ Demo books created');
+    } else {
+      console.log('✓ Books already exist in database');
     }
   } catch (error) {
     console.error('Error inserting demo data:', error);
+    // Don't throw here, as this is not critical for app startup
   }
 };
 
